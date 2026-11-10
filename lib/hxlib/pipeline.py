@@ -87,6 +87,8 @@ class Pipeline:
         self._templates: set[str] = set()
         self._char_pool: set[str] = set()
         self._token_pool: set[str] = set()
+        self._num_pool: set[str] = set()
+        self._prefix_pool: set[str] = set()
 
     # ------------------------------------------------------------- logging
     def log(self, *a) -> None:
@@ -209,6 +211,7 @@ class Pipeline:
             'templates': sorted(self._templates),
             'char_pool': sorted(self._char_pool),
             'stem_pool': sorted(self._stem_pool),
+            'prefix_pool': sorted(self._prefix_pool),
             'token_pool': sorted(self._token_pool),
         }
         tmp = path.with_suffix('.tmp')
@@ -240,6 +243,7 @@ class Pipeline:
         self._templates.update(obj.get('templates') or [])
         self._char_pool.update(obj.get('char_pool') or [])
         self._stem_pool.update(obj.get('stem_pool') or [])
+        self._prefix_pool.update(obj.get('prefix_pool') or [])
         self._token_pool.update(obj.get('token_pool') or [])
         self.stats['found_cache_' + kind] = len(found)
         return True
@@ -398,6 +402,44 @@ class Pipeline:
         return probed, added
 
     # ------------------------------------------------------------- stages
+    def _add_stem(self, stem: str) -> None:
+        """把 FRAGMENT 值轉成 stem 池候選（含分隔符前綴、locale 去掉、圖片字母變體）。"""
+        if not stem:
+            return
+        cands = [stem]
+        if '|' in stem:
+            cands.append(stem.split('|', 1)[0])
+        for sep in ('@', '%', ';'):
+            if sep in stem:
+                cands.append(stem.split(sep, 1)[0])
+        for base in list(cands):
+            for loc in ('_cn', '_tw', '_en', '_jp'):
+                if base.endswith(loc):
+                    cands.append(base[:-len(loc)])
+        m = re.match(r'^(.*?\d+)([a-z]{1,3})$', stem)
+        if m:
+            cands.extend([m.group(1), m.group(1) + m.group(2)[0]])
+        m2 = re.match(r'^(.*?)_[a-z]_([^_]+)$', stem)
+        if m2:
+            cands.append(m2.group(1) + '_' + m2.group(2))
+        # camelCase / 底線 token 也當 stem（例如 exgalleryCgMode -> exgallery）
+        for part in re.findall(r'[A-Za-z][A-Za-z0-9]{2,40}', stem):
+            cands.append(part)
+            mm = re.match(r'^([a-z][a-z0-9]{2,40}?)([A-Z].*)$', part)
+            if mm:
+                cands.append(mm.group(1))
+        for c in cands:
+            c = c.strip()
+            if not (2 <= len(c) <= 80):
+                continue
+            if any(ch in c for ch in '\\/:*?"<>|\r\n\t'):
+                continue
+            if any(t in c for t in ('${', '%d', '%s', 'TIME', 'SEASON')):
+                continue
+            if '.' in c:
+                continue
+            self._stem_pool.add(c)
+
     def _handle_facts(self, facts, modname: str, src: str) -> None:
         """把一批 Fact 轉成候選（直接 / 片段展開 / stage 樣板）。"""
         for f in facts:
@@ -421,12 +463,26 @@ class Pipeline:
                     t = tok.lower()
                     if t.isascii() and t.isalnum():
                         self._token_pool.add(t)
+                if v0.isdigit() and 2 <= len(v0) <= 6:
+                    self._num_pool.add(v0)
                 self.probe(Candidate(f.value, 'direct', src))
                 # XP3 entry 名稱一律小寫（引擎 convention）；資料檔常寫成
                 # 大小寫混合（Kosugi-Regular.ttf），故同時試小寫變體。
                 low = f.value.lower()
                 if low != f.value:
                     self.probe(Candidate(low, 'direct-lower', src))
+                # KiriKiri 場景檔：資料裡常寫 `xxx.ks`，實際 entry 是 `xxx.ks.scn`
+                if low.endswith('.ks'):
+                    self.probe(Candidate(f.value + '.scn', 'ks-scn', src))
+                    if low + '.scn' != f.value + '.scn':
+                        self.probe(Candidate(low + '.scn', 'ks-scn', src))
+                # 字型授權/聲明檔：`SourceHanSansAndSerif-LICENSE.txt` → 各語系後綴
+                for suffix in ('-license.txt', '-notice.txt'):
+                    if low.endswith(suffix):
+                        base = low[:-len(suffix)]
+                        for loc in ('jp', 'cn', 'tw', 'en'):
+                            self.probe(Candidate(base + loc + suffix,
+                                                 'license-locale', src))
                 continue
             if f.kind != KIND_FRAGMENT:
                 continue
@@ -434,16 +490,14 @@ class Pipeline:
             # （SE 名、設定表 stem…）。之後在 family stage 統一接上引擎實際
             # 出現過的副檔名再用 hash 驗證——跨遊戲通用。
             stem = f.value.strip()
-            # KAG storage 語法 `file|label`：真檔名只取 `|` 之前
-            if '|' in stem:
-                stem = stem.split('|', 1)[0].strip()
-            if (2 <= len(stem) <= 80
-                    and not any(c in stem for c in '\\/:*?"<>|\r\n\t')
-                    and not any(t in stem for t in ('${', '%d', '%s', 'TIME',
-                                                    'SEASON'))
-                    and '.' not in stem):
-                self._stem_pool.add(stem)
+            self._add_stem(stem)
             ctx = f.context or ''
+            # 原始碼字串常量中的 `touchicon_` 這類前綴：之後可與其他字串常量組合
+            if any(k in ctx for k in ('strlit', 'tjsrc:quote', 'tjs:const')):
+                vv = f.value.strip()
+                if (3 <= len(vv) <= 40 and vv.endswith('_')
+                        and not any(c in vv for c in '\\/:*?"<>|')):
+                    self._prefix_pool.add(vv)
             # 收集「名字模板」（%s / %08x / %d）與「角色名池」：前者是引擎
             # 產生 runtime 名字的格式字串（例如 "%s%08x%08x.png"、'chthum_%s_'），
             # 後者是 CSV 角色表第一欄。兩者都是資料驅動，不寫死遊戲常數。
@@ -462,6 +516,8 @@ class Pipeline:
                     t = tok.lower()
                     if t.isascii() and t.isalnum():
                         self._token_pool.add(t)
+                if v.isdigit() and 2 <= len(v) <= 6:
+                    self._num_pool.add(v)
             elif (f.kind == KIND_NAME and ':csv:col0' in ctx
                   and any(k in ctx.lower() for k in
                           ('char', 'scn', 'kag', 'chart'))):
@@ -1076,6 +1132,266 @@ class Pipeline:
                  '-> %d found (%s)'
                  % (len(stems), len(exts), probed, added, len(self.found),
                     self.elapsed(t0)))
+
+        # 數字家族補洞：`hid_sys_20..24` → 補 00..19；`X_0001..` 補中間缺號。
+        # 只用「已 hash 驗證的相鄰名字」推數字範圍，不寫死任何遊戲常數。
+        def numeric_gap_names():
+            import re as _re
+            groups = {}
+            for name in list(self.found.values()):
+                m = _re.match(r'^(.*?)(\d{1,6})(\.[A-Za-z0-9][A-Za-z0-9.]*)$',
+                              name)
+                if not m:
+                    continue
+                pref, num, ext = m.group(1), m.group(2), m.group(3)
+                if not pref or len(pref) > 100:
+                    continue
+                groups.setdefault((pref, len(num), ext.lower()),
+                                  set()).add(int(num))
+            yieldable = [(max(v), k, v) for k, v in groups.items()
+                         if max(v) <= 5000 and
+                         (len(v) >= 2 or (len(v) == 1 and max(v) <= 2000))]
+            yieldable.sort(key=lambda x: x[0])
+            n = 0
+            for hi, (pref, width, ext), nums in yieldable:
+                for v in range(0, hi + 1):
+                    if v in nums:
+                        continue
+                    yield pref + str(v).zfill(width) + ext
+                    n += 1
+                    if n > 4_000_000:
+                        return
+
+        probed, added = self.probe_fast(numeric_gap_names(), 'numeric-gap',
+                                        'family')
+        self.stats['numeric_gap_candidates'] = probed
+        self.log('  [numeric-gap] %d candidates (+%d) -> %d found (%s)'
+                 % (probed, added, len(self.found), self.elapsed(t0)))
+
+        # 音訊 sidecar：找到 X.opus / X.ogg 後，補 X.opus.sli / X.ogg.sli
+        def audio_sidecar_names():
+            for name in list(self.found.values()):
+                low = name.lower()
+                if low.endswith(('.opus', '.ogg', '.wav')):
+                    yield name + '.sli'
+
+        probed, added = self.probe_fast(audio_sidecar_names(), 'audio-sidecar',
+                                        'family')
+        self.stats['audio_sidecar_candidates'] = probed
+        self.log('  [audio-sidecar] %d candidates (+%d) -> %d found (%s)'
+                 % (probed, added, len(self.found), self.elapsed(t0)))
+
+        # 相鄰家族的字母/數字補齊（先做便宜且高產的，再做數字延伸）
+        def numeric_edge_names():
+            import re as _re
+            n = 0
+            # 1) 單字母家族（只有 a 一個種子）：外_商店街a -> b/c/d
+            for name in list(self.found.values()):
+                stem, ext = os.path.splitext(name)
+                if (len(stem) >= 3 and stem[-1] in 'abcdefghijklmnopqrstuvwxyz'
+                        and any(ord(c) > 0x7f for c in stem)):
+                    base = stem[:-1]
+                    for ch in 'abcdefghijklmnopqrstuvwxyz':
+                        if ch != stem[-1]:
+                            yield base + ch + ext
+                            n += 1
+                            if n > 600_000:
+                                return
+            # 2) 去尾端數字：壁2 -> 壁
+            for name in list(self.found.values()):
+                stem, ext = os.path.splitext(name)
+                m = _re.match(r'^(.*\D)\d+$', stem)
+                if m:
+                    yield m.group(1) + ext
+                    n += 1
+                    if n > 700_000:
+                        return
+            # 3) 數字後的尾字母：meg207_031 -> meg207_031b
+            for name in list(self.found.values()):
+                stem, ext = os.path.splitext(name)
+                if _re.match(r'^.*\d$', stem):
+                    for ch in 'abcdefghijklmnopqrstuvwxyz':
+                        yield stem + ch + ext
+                        n += 1
+                        if n > 1_200_000:
+                            return
+            # 4) 已密集數字序列往後延伸（nen102_130 -> 131）
+            pat = _re.compile(r'^(.*?)(\d{1,6})(\.[A-Za-z0-9][A-Za-z0-9.]*)$')
+            groups = {}
+            for name in list(self.found.values()):
+                m = pat.match(name)
+                if m:
+                    groups.setdefault((m.group(1), len(m.group(2)),
+                                       m.group(3).lower()), set()).add(
+                                           int(m.group(2)))
+            for (pref, width, ext), vals in sorted(groups.items(),
+                                                   key=lambda kv: max(kv[1])):
+                hi = max(vals)
+                if len(vals) < 5 or hi > 5000:
+                    continue
+                for v in range(hi + 1, hi + 401):
+                    yield pref + str(v).zfill(width) + ext
+                    n += 1
+                    if n > 2_000_000:
+                        return
+
+        probed, added = self.probe_fast(numeric_edge_names(), 'numeric-edge',
+                                        'family')
+        self.stats['numeric_edge_candidates'] = probed
+        self.log('  [numeric-edge] %d candidates (+%d) -> %d found (%s)'
+                 % (probed, added, len(self.found), self.elapsed(t0)))
+
+        # 來源字串前綴 × 字串常量（touchicon_ + auto/skip/...）
+        def prefix_token_names():
+            import re as _re
+            prefixes = [p for p in self._prefix_pool
+                        if _re.match(r'^[a-z0-9_]{3,40}$', p)]
+            prefixes.sort(key=lambda p: (-len(p), p))
+            tokens = sorted(t for t in self._token_pool
+                            if 2 <= len(t) <= 20 and t.isascii())
+            n = 0
+            for pref in prefixes:
+                m = 0
+                # touchicon 圖示是 PNG；helpmark_9654 這類是 4 位字碼
+                if '.png' in exts:
+                    for v in range(0, 10000):
+                        yield pref + str(v).zfill(4) + '.png'
+                        n += 1; m += 1
+                        if m >= 12_000 or n > 5_000_000:
+                            break
+                for tok in tokens:
+                    if m >= 45_000 or n > 5_000_000:
+                        break
+                    yield pref + tok + '.png'
+                    n += 1; m += 1
+                if n > 5_000_000:
+                    return
+
+        probed, added = self.probe_fast(prefix_token_names(), 'prefix-token',
+                                        'family')
+        self.stats['prefix_token_candidates'] = probed
+        self.log('  [prefix-token] %d prefixes, %d candidates (+%d) '
+                 '-> %d found (%s)'
+                 % (len(self._prefix_pool), probed, added, len(self.found),
+                    self.elapsed(t0)))
+
+        # 既有名字 + 字串常量後綴（sys_page1 + allage -> sys_page1_allage.func）
+        def suffix_token_names():
+            import re as _re
+            toks = sorted(t for t in self._token_pool
+                          if 3 <= len(t) <= 16 and t.isascii())
+            text_exts = [e for e in exts if e in
+                         ('.func', '.csv', '.ini', '.txt', '.tjs', '.png',
+                          '.pbd', '.scn')]
+            n = 0
+            for name in sorted(self.found.values(), key=lambda x: (len(x), x)):
+                stem, ext = os.path.splitext(name)
+                if ext.lower() not in text_exts or len(stem) > 40:
+                    continue
+                m = 0
+                for tok in toks:
+                    yield stem + '_' + tok + ext
+                    n += 1
+                    m += 1
+                    if m >= 2000 or n > 2_000_000:
+                        break
+                if n > 2_000_000:
+                    return
+
+        probed, added = self.probe_fast(suffix_token_names(), 'suffix-token',
+                                        'family')
+        self.stats['suffix_token_candidates'] = probed
+        self.log('  [suffix-token] %d candidates (+%d) -> %d found (%s)'
+                 % (probed, added, len(self.found), self.elapsed(t0)))
+
+        # 已命中的音效名 + 已知的括號/分隔詞：→→走る／学校／靴 + （男）
+        inner_pool = set()
+        paren_re = re.compile(r'[（(]([^（()）【】]{1,16})[）)]')
+        for name in list(self.found.values()):
+            for m in paren_re.finditer(name):
+                inner_pool.add(m.group(1))
+        sep_tokens = set()
+        for name in list(self.found.values()):
+            for tok in re.split(r'[／/]', os.path.splitext(name)[0]):
+                if 2 <= len(tok) <= 16 and tok not in ('',):
+                    sep_tokens.add(tok)
+
+        def audio_variant_names():
+            n = 0
+            for name in list(self.found.values()):
+                stem, ext = os.path.splitext(name)
+                if ext.lower() not in ('.ogg', '.wav', '.opus', '.sli'):
+                    continue
+                if ('（' in stem or '(' in stem or '【' in stem):
+                    continue
+                for tok in inner_pool:
+                    yield stem + '（' + tok + '）' + ext
+                    n += 1
+                for tok in sep_tokens:
+                    yield stem + '／' + tok + ext
+                    n += 1
+                if n > 400_000:
+                    return
+
+        probed, added = self.probe_fast(audio_variant_names(), 'audio-variant',
+                                        'family')
+        self.stats['audio_variant_candidates'] = probed
+        self.log('  [audio-variant] %d candidates (+%d) -> %d found (%s)'
+                 % (probed, added, len(self.found), self.elapsed(t0)))
+
+        # UI 狀態交叉組合：`exchview@back%button;normal`
+        ui_re = re.compile(r'^(.*?)@([^%]+)%([^;]+);(.+)$')
+        bases, comps, styles, states = set(), set(), set(), set()
+        for name in self.found.values():
+            m = ui_re.match(name)
+            if not m:
+                continue
+            bases.add(m.group(1)); comps.add(m.group(2))
+            styles.add(m.group(3)); states.add(m.group(4))
+        ui_names = None
+        if bases and comps and styles and states:
+            def ui_combo_names():
+                n = 0
+                for b in sorted(bases):
+                    m = 0
+                    for c in sorted(comps):
+                        for st in sorted(styles):
+                            for sta in sorted(states):
+                                yield '%s@%s%%%s;%s' % (b, c, st, sta)
+                                n += 1
+                                m += 1
+                                if m >= 30_000 or n > 2_000_000:
+                                    break
+                            if m >= 30_000 or n > 2_000_000:
+                                break
+                        if m >= 30_000 or n > 2_000_000:
+                            break
+                    if n > 2_000_000:
+                        return
+            ui_names = ui_combo_names()
+        if ui_names is not None:
+            probed, added = self.probe_fast(ui_names, 'ui-combo', 'family')
+            self.stats['ui_combo_candidates'] = probed
+            self.log('  [ui-combo] %d bases, %d candidates (+%d) -> %d found '
+                     '(%s)' % (len(bases), probed, added, len(self.found),
+                                self.elapsed(t0)))
+
+        # 已知 `_allage` 變體時，替同副檔名家族補齊。
+        allage_exts = {os.path.splitext(n)[1].lower() for n in self.found.values()
+                       if '_allage' in os.path.splitext(n)[0].lower()}
+
+        def allage_names():
+            for name in list(self.found.values()):
+                stem, ext = os.path.splitext(name)
+                if ext.lower() not in allage_exts or '_allage' in stem.lower():
+                    continue
+                yield stem + '_allage' + ext
+
+        probed, added = self.probe_fast(allage_names(), 'allage-variant',
+                                        'family')
+        self.stats['allage_variant_candidates'] = probed
+        self.log('  [allage] %d candidates (+%d) -> %d found (%s)'
+                 % (probed, added, len(self.found), self.elapsed(t0)))
 
         def stem_locale_names():
             n = 0

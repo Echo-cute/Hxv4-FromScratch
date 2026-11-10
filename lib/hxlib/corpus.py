@@ -33,6 +33,7 @@ import os
 import struct
 import sys
 import time
+import zlib
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass, asdict
 from pathlib import Path
@@ -61,6 +62,7 @@ T_TJS = 'tjs'          # TJS2100
 T_TJS_NS = 'tjs_ns'    # TJS/ns0
 T_PBD = 'pbd'          # TJS/4s0
 T_TEXT = 'text'        # 0xFE 解擾 / UTF-16 / UTF-8 / SJIS 可讀文字
+T_MDF = 'mdf'          # YuzuSoft/KiriKiri mdf\0 + zlib 包裝
 T_OTHER = 'other'      # 未分類二進位（不落地）
 
 # 媒體型態：不落地，但「目標 entry 是什麼型態」是組合副檔名的重要證據。
@@ -159,6 +161,8 @@ def classify_bytes(data: bytes) -> str:
     """依解密後內容的檔頭判斷型態（邏輯型 + 媒體型都分）。"""
     if not data:
         return T_BINARY
+    if data.startswith(b'mdf\x00'):
+        return T_MDF
     if data.startswith(b'PSB\x00'):
         return T_PSB
     if data.startswith(b'TJS2100\x00'):
@@ -202,10 +206,22 @@ def classify_bytes(data: bytes) -> str:
     return T_BINARY
 
 
+def unwrap_mdf(data: bytes) -> bytes:
+    """mdf\0 + uint32(original) + zlib 包裝 → 解壓後內容（失敗原樣回傳）。"""
+    if len(data) >= 8 and data[:4] == b'mdf\x00':
+        try:
+            return zlib.decompress(data[8:])
+        except Exception:
+            return data
+    return data
+
+
 def _kind_rank(kind: str) -> int:
     """比較「過濾後 head」與「原始 head」哪個分類比較可信。"""
     if kind in (T_PSB, T_TJS, T_TJS_NS, T_PBD):
         return 100
+    if kind == T_MDF:
+        return 95
     if kind in (T_OGG, T_OPUS, T_PNG, T_JPG, T_TLG, T_WAV, T_MOVIE, T_FONT, T_TFT):
         return 80
     if kind == T_TEXT:
@@ -365,10 +381,11 @@ def _extract_task(task: tuple[str, list[int], str]) -> tuple[str, list[dict]]:
                         if _kind_rank(k2) > _kind_rank(kind):
                             kind = k2
                     row['kind'] = kind
-                    if kind in LOGIC_KINDS:
+                    if kind in LOGIC_KINDS or kind == T_MDF:
                         data = xi.extract_entry(
                             arc.blob, entry, filter_name='recovered',
                             filter_state=st).data
+                        data = unwrap_mdf(data)
                         kind = classify_bytes(data)
                         row['kind'] = kind
                         ext = {T_PSB: '.psb', T_TJS: '.tjs',
@@ -714,7 +731,7 @@ class Corpus:
                         if _kind_rank(kind2) > _kind_rank(kind):
                             kind = kind2
                     ce.kind = kind
-                    if kind not in LOGIC_KINDS:
+                    if kind not in LOGIC_KINDS and kind != T_MDF:
                         # 媒體：不落地，只留型態（組合副檔名時要用）
                         if entry.original_size > MAX_LOGIC_SIZE and kind in (T_BINARY,):
                             ce.error = 'media (too large)'
@@ -723,6 +740,7 @@ class Corpus:
                     data = xi.extract_entry(
                         arc.blob, entry, filter_name='recovered',
                         filter_state=states[idx]).data
+                    data = unwrap_mdf(data)
                     kind = classify_bytes(data)
                     ce.kind = kind
                     ext = {T_PSB: '.psb', T_TJS: '.tjs', T_TJS_NS: '.tjsns',
@@ -746,6 +764,7 @@ class Corpus:
                                  size=entry.original_size, kind=T_BINARY)
                 try:
                     data = xi.extract_entry(arc.blob, entry, filter_name='none').data
+                    data = unwrap_mdf(data)
                     kind = classify_bytes(data)
                     ce.kind = kind
                     if kind in LOGIC_KINDS:
