@@ -1792,11 +1792,6 @@ def install_garbro(garbro_dir, out_lst, drip_path, log=print):
             copied.append('GameData\\drip_program.json')
         else:
             log('  [garbro] drip 檔不存在：%s' % drip)
-    # 舊版放在根目錄的檔案不影響（外掛以 GameData 優先），只提示可刪。
-    legacy = [n for n in ('HxNames.lst', 'drip_program.json')
-              if (dst / n).is_file()]
-    if legacy:
-        log('  [garbro] 根目錄仍有舊版檔案（可刪）：%s' % ', '.join(legacy))
     log('  [garbro] 已安裝到 %s：%s' % (dst, ', '.join(copied)))
     return dst
 

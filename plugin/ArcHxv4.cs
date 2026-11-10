@@ -13,8 +13,7 @@
 //      再用 Adler32 校驗。
 //
 // 本檔案在託管碼裡實作 2 與 3，並用外部 `HxNames.lst`（hash:name）把雜湊
-// 換回真實檔名。`HxNames.lst` 與 `drip_program.json` 會優先在
-// `GARbro/GameData/` 找，其次才是 DLL 同層與 `hxv4/`（舊版相容）。
+// 換回真實檔名；`HxNames.lst` 與 `drip_program.json` 從 `GARbro/GameData/` 讀取。
 //
 // 建置：見同目錄 build.ps1
 
@@ -667,12 +666,9 @@ namespace GameRes.Formats.Hxv4
             get { return Path.GetDirectoryName (typeof (Hxv4Xp3Opener).Assembly.Location); }
         }
 
-        // GARbro 根目錄、以及社群慣用的 GameData/ 都找；舊版放在 DLL 同層或 hxv4/ 也還能用。
-        static IEnumerable<string> DataCandidates (string dir, string fileName)
+        static string DataFile (string dir, string fileName)
         {
-            yield return Path.Combine (Path.Combine (dir, "GameData"), fileName);
-            yield return Path.Combine (dir, fileName);
-            yield return Path.Combine (Path.Combine (dir, "hxv4"), fileName);
+            return Path.Combine (Path.Combine (dir, "GameData"), fileName);
         }
 
         static void EnsureLoaded ()
@@ -684,23 +680,19 @@ namespace GameRes.Formats.Hxv4
                 if (s_loaded)
                     return;
                 var dir = BaseDir;
-                foreach (var cand in DataCandidates (dir, "drip_program.json"))
+                var dripFile = DataFile (dir, "drip_program.json");
+                if (File.Exists (dripFile))
                 {
-                    if (File.Exists (cand))
-                    {
-                        try { s_drip = DripProgram.Load (cand); } catch { }
-                        break;
-                    }
+                    try { s_drip = DripProgram.Load (dripFile); } catch { }
                 }
                 // 檔名對照表：GARbro 格式 "<64 hex BLAKE2s>:<name>"
                 s_names = new Dictionary<string, string> (StringComparer.Ordinal);
-                foreach (var cand in DataCandidates (dir, "HxNames.lst"))
+                var namesFile = DataFile (dir, "HxNames.lst");
+                if (File.Exists (namesFile))
                 {
-                    if (!File.Exists (cand))
-                        continue;
                     try
                     {
-                        foreach (var line in File.ReadLines (cand, Encoding.UTF8))
+                        foreach (var line in File.ReadLines (namesFile, Encoding.UTF8))
                         {
                             var s = line.Trim ();
                             if (s.IndexOf (':') != 64)
@@ -709,7 +701,6 @@ namespace GameRes.Formats.Hxv4
                         }
                     }
                     catch { }
-                    break;
                 }
                 s_loaded = true;
             }

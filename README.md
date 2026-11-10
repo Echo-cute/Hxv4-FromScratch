@@ -39,7 +39,7 @@ python tools/run\_gui.py
 * 完成後自動把 `ArcHxv4.dll` 放進 GARbro 根目錄，`HxNames.lst` 與
 `drip\_program.json` 放進 GARbro 的 `GameData\\`
 
-!\[Hxv4 檔名推導工具 GUI](docs/gui.png)
+![Hxv4 檔名推導工具 GUI](docs/gui.png)
 
 ## 快速開始（指令列）
 
@@ -77,9 +77,6 @@ python tools/run\_pipeline.py --game <id> ^
 * 在沒有本專案外掛時，GARbro-Mod 內建的 XP3 reader 對這幾款遊戲不一定能開
 （實測 lllj 可以，tenshi、Sanoba Witch 會顯示 `unknown format`），
 所以 `GameData\\HxNames.lst` 不能單獨取代 `ArcHxv4.dll`。
-* 本專案的 `ArcHxv4.dll` 也支援社群寫法：優先在 `GameData\\` 找
-`HxNames.lst`／`drip\_program.json`，找不到才退回 DLL 同層與 `hxv4\\`
-（舊版安裝方式仍可用）。
 
 ## 動態 dump 的兩種模式
 
