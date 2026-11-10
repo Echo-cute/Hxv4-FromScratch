@@ -1,0 +1,25 @@
+# 執行產物（不進版控）
+work/
+userdata/
+vendor/
+__pycache__/
+*.pyc
+
+# 建置產物（安裝時自動用原始碼編譯）
+out/
+lib/pbd2json.exe
+
+# KrkrDump：第三方 GPL-3.0，由 bootstrap 自動下載，不隨 repo 附
+tools/krkr/*.dll
+tools/krkr/*.exe
+tools/krkr/*.json
+tools/krkr/*.log
+
+# 遊戲資料
+*.xp3
+*.xp3.sig
+*.sig
+
+# 編輯器
+.vscode/
+.idea/
