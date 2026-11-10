@@ -5,9 +5,7 @@ vendor/
 __pycache__/
 *.pyc
 
-# 建置產物（安裝時自動用原始碼編譯）
-out/
-lib/pbd2json.exe
+# 建置產物（out/ArcHxv4.dll、lib/pbd2json.exe）隨 repo 提供，不忽略
 
 # KrkrDump：第三方 GPL-3.0，由 bootstrap 自動下載，不隨 repo 附
 tools/krkr/*.dll

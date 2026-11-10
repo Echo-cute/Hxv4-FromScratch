@@ -1766,7 +1766,7 @@ def install_garbro(garbro_dir, out_lst, drip_path, log=print):
     # 1) 清單（GameData，和社群清單同一位置）
     shutil.copy2(out_lst, data / 'HxNames.lst')
     copied.append('GameData\\HxNames.lst')
-    # 2) ArcHxv4.dll（本專案 plugin；out/ 不進版控，缺檔時當場編譯）
+    # 2) ArcHxv4.dll（repo 已附 out/；缺檔時才用原始碼編譯）
     dll = root / 'out' / 'ArcHxv4.dll'
     if not dll.is_file():
         import subprocess
