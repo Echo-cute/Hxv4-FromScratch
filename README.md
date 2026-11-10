@@ -69,14 +69,10 @@ python tools/run_pipeline.py --game <id> ^
 `HxNames.lst` 和 `drip_program.json` 要一起換。
 4. 放好後重開 GARbro，開 XP3 就會顯示對應的真檔名；不需要修改遊戲檔案。
 
-`ArcHxv4.dll` 仍然必須放在 **GARbro 根目錄**（和 `GARbro.GUI.exe` 同層），
-不能只用 `GameData\` 的清單取代外掛：
+`ArcHxv4.dll` 要放在 **GARbro 根目錄**（和 `GARbro.GUI.exe` 同層）。
 
-* 這份 `HxNames.lst` 只是「雜湊 → 檔名」對照表；讀 XP3 的 Hxv4 index、
-解密 Hxv4 表與 entry 內容仍由 `ArcHxv4.dll` 負責。
-* 在沒有本專案外掛時，GARbro-Mod 內建的 XP3 reader 對這幾款遊戲不一定能開
-（實測 lllj 可以，tenshi、Sanoba Witch 會顯示 `unknown format`），
-所以 `GameData\HxNames.lst` 不能單獨取代 `ArcHxv4.dll`。
+* `HxNames.lst`：檔名對照表。
+* `ArcHxv4.dll`：讀 XP3 的 Hxv4 index、解密 Hxv4 表與 entry 內容。
 
 ## 動態 dump 的兩種模式
 
