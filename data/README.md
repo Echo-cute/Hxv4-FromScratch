@@ -9,7 +9,7 @@
 |`HxNames.lllj.lst`|ライムライト・レモネードジャム|本專案 + [MLChinoo/lllj\_hxnames](https://github.com/MLChinoo/lllj_hxnames)|61,311|24|61,310|99.97%（61,310 / 61,327）|
 |`HxNames.tenshi.lst`|天使☆騒々 RE-BOOT!|本專案 + [MLChinoo/ten\_sz\_hxnames](https://github.com/MLChinoo/ten_sz_hxnames)|58,137|25|58,136|99.95%（58,136 / 58,166）|
 |`HxNames.sanoba.lst`|Sanoba Witch / Sabbat of the Witch|本專案 + [MLChinoo/sanoba\_hxnames](https://github.com/MLChinoo/sanoba_hxnames)|48,000|39|48,000|99.99%（48,000 / 48,006）|
-|`HxNames.cafestella.lst`|喫茶ステラと死神の蝶 (CafeStella)|本專案（無社群清單）|48,155|17|48,155|99.76%（48,155 / 48,271）|
+|`HxNames.cafestella.lst`|喫茶ステラと死神の蝶 (CafeStella)|本專案（無社群清單）|48,159|17|48,159|99.77%（48,159 / 48,271）|
 
 ## 來源與合併方式
 
@@ -27,8 +27,8 @@ Hxv4 table 驗證；詳細流程見 `GUIDE.md`。
 hash，所以「檔名數」比「對應 table」多 1。
 * Sanoba 的 48,006 包含 1 筆 index 明文；table 的 48,005 個 hash 中還有 5 個
 沒有檔名，加上該筆明文共 6 筆未解出（執行期動態載入或無靜態線索）。
-* CafeStella 還有 115 筆未解出（UI 變體、adult 縮圖、影片與少數未引用檔），
-沒有可用的靜態字串線索。
+* CafeStella 還有 111 個 table hash 沒有檔名（另有 1 筆 index 明文），
+沒有可用的靜態字串線索；已加入動態 dump 找到的 4 個名字。
 * 其餘未解出的 hash 都是遊戲執行期才動態載入、或任何資料裡都沒留下字串的檔案；
 清單只收錄能通過 hash 驗證或由社群確認的名字。
 
