@@ -1,5 +1,7 @@
 # Hxv4 Filename Recovery Tool
 
+[繁體中文](README.md)
+
 Hxv4 (Cxdec / Hxv4 protection) replaces the filenames inside KiriKiri XP3 archives with garbled fake names.
 
 Four verified games (lists included in `data/`):

@@ -1,5 +1,7 @@
 # Hxv4 檔名還原工具
 
+[English](README_EN.md)
+
 Hxv4（Cxdec / Hxv4 保護）會把 KiriKiri XP3 內的檔名換成亂碼假名。
 
 已驗證的四款遊戲（清單附在 `data/`）：
